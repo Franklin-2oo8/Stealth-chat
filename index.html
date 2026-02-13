@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>System 404</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root { --glow: #00ffcc; --red: #ff4444; --bg: #050505; --panel: #111; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+        
+        body { height: 100svh; background: #000; color: #ccc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; }
+        
+        #fake-ui { height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #333; }
+        #secret-ui { display: none; flex-direction: column; height: 100svh; width: 100%; background: var(--bg); padding: 10px; }
+
+        #status-bar { font-size: 0.7rem; padding: 5px 0; color: #666; display: flex; justify-content: space-between; text-transform: uppercase; }
+        .online { color: var(--glow); text-shadow: 0 0 5px var(--glow); }
+
+        #chat-box { flex: 1; overflow-y: auto; border: 1px solid #222; border-left: 3px solid var(--glow); padding: 10px; font-size: 0.85rem; background: #000; margin: 5px 0; border-radius: 4px; }
+        .msg { margin-bottom: 8px; border-bottom: 1px solid #0d0d0d; padding-bottom: 4px; }
+        .u-tag { color: var(--glow); font-weight: bold; margin-right: 5px; }
+
+        .controls { display: flex; flex-direction: column; gap: 6px; }
+        .row { display: flex; gap: 6px; width: 100%; }
+        
+        input { flex: 1; background: var(--panel); border: 1px solid #333; color: white; padding: 12px; font-size: 0.9rem; border-radius: 6px; outline: none; }
+        button { background: var(--panel); border: 1px solid var(--glow); color: var(--glow); padding: 10px; font-weight: bold; border-radius: 6px; font-size: 0.75rem; }
+        button:active { background: var(--glow); color: #000; }
+
+        .haptic-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
+        .call-btn { border-color: #5d5df5; color: #5d5df5; }
+
+        #v-area { background: var(--panel); border: 1px solid #222; border-radius: 8px; position: relative; min-height: 50px; display: flex; align-items: center; margin-top: 4px; }
+        #v-btn { width: 100%; height: 100%; color: var(--red); border-color: var(--red); }
+        
+        #countdown-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: bold; color: var(--red); background: rgba(0,0,0,0.9); border-radius: 8px; z-index: 10; }
+
+        .preview-box { display: none; gap: 6px; width: 100%; padding: 0 5px; }
+        .preview-box button { flex: 1; }
+
+        #id-tag { font-size: 0.6rem; text-align: center; color: #444; margin-top: 8px; padding-top: 5px; border-top: 1px solid #111; }
+        .panic { position: fixed; top: 0; left: 0; width: 100%; height: 40px; z-index: 999; }
+        
+        /* Incoming Call Modal */
+        #call-ui { display:none; position:fixed; top:20%; left:10%; width:80%; background:#111; border:2px solid var(--glow); padding:20px; text-align:center; z-index:1000; border-radius:10px; }
+    </style>
+</head>
+<body>
+
+    <div id="fake-ui" onclick="unlock()">
+        <h1>404</h1>
+        <p>Resource Error: Link Broken</p>
+    </div>
+
+    <div id="secret-ui">
+        <div class="panic" onclick="location.reload()"></div>
+        <div id="status-bar"><span>NET: <span id="p-status">OFFLINE</span></span><span>PHANTOM_v6</span></div>
+        <div id="chat-box">-- SECURE BOOT COMPLETE --</div>
+
+        <div class="controls">
+            <div class="row">
+                <input type="text" id="target" placeholder="Partner ID">
+                <button onclick="connectToPeer()">LINK</button>
+            </div>
+            <div class="row">
+                <input type="text" id="m-in" placeholder="Message...">
+                <button onclick="sendText()">SEND</button>
+            </div>
+            <div class="haptic-grid">
+                <button onclick="sendHap('yes')">YES</button>
+                <button onclick="sendHap('no')">NO</button>
+                <button onclick="sendHap('alert')" style="color:var(--red);border-color:var(--red);">!!!</button>
+                <button class="call-btn" onclick="startCall()">VOICE</button>
+            </div>
+            <div id="v-area">
+                <button id="v-btn" onclick="startRec()">VOICE NOTE (10s)</button>
+                <div id="countdown-overlay">10</div>
+                <div id="preview-box" class="preview-box">
+                    <button onclick="playLocal()" style="color:#fff;">PLAY</button>
+                    <button onclick="sendVoice()" style="background:var(--glow); color:black; border:none;">SEND</button>
+                    <button onclick="resetRec()">X</button>
+                </div>
+            </div>
+        </div>
+        <div id="id-tag">YOUR ID: <span id="my-id" style="color:#888">...</span></div>
+    </div>
+
+    <div id="call-ui">
+        <h3 style="color:var(--glow)">INCOMING VOICE CALL</h3>
+        <p id="caller-name" style="margin:15px 0"></p>
+        <button onclick="answerCall()" style="background:var(--glow); color:#000; width:100%; margin-bottom:10px">ANSWER</button>
+        <button onclick="location.reload()" style="border-color:var(--red); color:var(--red); width:100%">REJECT</button>
+    </div>
+
+    <script>
+        let peer, conns = [], myName = "", audioData = null, rec, chunks = [], clicks = 0, currentCall;
+        const hapLib = { 'yes': [200, 100, 200], 'no': [500], 'alert': [100, 50, 100, 50, 100, 50, 500] };
+
+        // 1. PERSISTENT ID LOGIC
+        let savedID = localStorage.getItem('phantom_id');
+        if(!savedID) {
+            savedID = Math.random().toString(36).substring(2, 8).toUpperCase();
+            localStorage.setItem('phantom_id', savedID);
+        }
+
+        function unlock() {
+            if (++clicks >= 3) {
+                navigator.vibrate(50); 
+                myName = prompt("Code Name:") || "Ghost";
+                document.getElementById('fake-ui').style.display = 'none';
+                document.getElementById('secret-ui').style.display = 'flex';
+                initPeer();
+            }
+        }
+
+        function initPeer() {
+            peer = new Peer(savedID, { config: {'iceServers': [{url:'stun:stun.l.google.com:19302'}]} });
+            peer.on('open', id => document.getElementById('my-id').innerText = id);
+            peer.on('connection', c => setup(c));
+            
+            // Handle Incoming Calls
+            peer.on('call', call => {
+                currentCall = call;
+                document.getElementById('call-ui').style.display = 'block';
+                document.getElementById('caller-name').innerText = "Incoming Encrypted Link...";
+                navigator.vibrate([500, 500, 500]);
+            });
+
+            setInterval(() => {
+                const isOnline = conns.some(c => c.open);
+                const el = document.getElementById('p-status');
+                el.innerText = isOnline ? "ONLINE" : "OFFLINE";
+                el.className = isOnline ? "online" : "";
+            }, 3000);
+        }
+
+        function connectToPeer() {
+            const id = document.getElementById('target').value.toUpperCase();
+            if(id) setup(peer.connect(id));
+        }
+
+        function setup(c) {
+            c.on('open', () => { conns.push(c); log("SYSTEM", "SECURE TUNNEL OPEN"); });
+            c.on('data', d => {
+                if (d.t === 'txt') log(d.n, d.v);
+                if (d.t === 'hap') { navigator.vibrate(hapLib[d.v]); log(d.n, `[Haptic: ${d.v}]`); }
+                if (d.t === 'voc') {
+                    const audId = "aud_" + Date.now();
+                    log(d.n, `Voice Note <div style="display:inline-block;background:#111;padding:5px;border:1px solid #333;margin-left:5px"><button onclick="document.getElementById('${audId}').play()" style="padding:2px 8px;font-size:10px">PLAY</button></div><audio id="${audId}" src="${d.v}"></audio>`);
+                }
+            });
+        }
+
+        // --- CALL LOGIC ---
+        async function startCall() {
+            const targetId = document.getElementById('target').value.toUpperCase();
+            if(!targetId) return alert("Enter Partner ID first");
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const call = peer.call(targetId, stream);
+            log("SYSTEM", "Calling...");
+            call.on('stream', remoteStream => {
+                playStream(remoteStream);
+                log("SYSTEM", "VOICE CONNECTED");
+            });
+        }
+
+        async function answerCall() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            currentCall.answer(stream);
+            document.getElementById('call-ui').style.display = 'none';
+            currentCall.on('stream', remoteStream => {
+                playStream(remoteStream);
+                log("SYSTEM", "VOICE CONNECTED");
+            });
+        }
+
+        function playStream(stream) {
+            const audio = new Audio();
+            audio.srcObject = stream;
+            audio.play();
+        }
+
+        // --- VOICE NOTE LOGIC (10s) ---
+        async function startRec() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioCtx = new AudioContext();
+                const source = audioCtx.createMediaStreamSource(stream);
+                const gainNode = audioCtx.createGain();
+                gainNode.gain.value = 2.5; 
+                const dest = audioCtx.createMediaStreamDestination();
+                source.connect(gainNode); gainNode.connect(dest);
+
+                rec = new MediaRecorder(dest.stream);
+                chunks = [];
+                rec.ondataavailable = e => chunks.push(e.data);
+                rec.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'audio/webm' });
+                    const r = new FileReader();
+                    r.onload = () => { audioData = r.result; 
+                        document.getElementById('v-btn').style.display = "none";
+                        document.getElementById('countdown-overlay').style.display = "none";
+                        document.getElementById('preview-box').style.display = "flex";
+                    };
+                    r.readAsDataURL(blob);
+                    stream.getTracks().forEach(t => t.stop());
+                };
+                rec.start();
+                const overlay = document.getElementById('countdown-overlay');
+                overlay.style.display = "flex";
+                let timeLeft = 10;
+                overlay.innerText = timeLeft;
+                const timerInterval = setInterval(() => {
+                    timeLeft--; overlay.innerText = timeLeft;
+                    if(timeLeft <= 0) { clearInterval(timerInterval); if(rec.state === "recording") rec.stop(); }
+                }, 1000);
+            } catch(e) { log("SYSTEM", "Mic Error"); }
+        }
+
+        function log(n, m) { const b = document.getElementById('chat-box'); b.innerHTML += `<div class="msg"><span class="u-tag">[${n}]</span> ${m}</div>`; b.scrollTop = b.scrollHeight; }
+        function sendText() { const val = document.getElementById('m-in').value; if(!val) return; broadcast({t:'txt', v:val, n:myName}); log("ME", val); document.getElementById('m-in').value = ""; }
+        function sendHap(type) { broadcast({t:'hap', v:type, n:myName}); navigator.vibrate(hapLib[type]); }
+        function playLocal() { if(audioData) new Audio(audioData).play(); }
+        function sendVoice() { broadcast({t:'voc', v:audioData, n:myName}); log("ME", "[Voice Sent]"); resetRec(); }
+        function resetRec() { audioData = null; document.getElementById('v-btn').style.display = "block"; document.getElementById('preview-box').style.display = "none"; document.getElementById('countdown-overlay').style.display = "none"; }
+        function broadcast(d) { conns.forEach(c => { if(c.open) c.send(d); }); }
+    </script>
+</body>
+      </html>
